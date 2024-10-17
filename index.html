@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EQ Log Parser</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        #fileInput, button {
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+            min-width: 100px; /* Ensure minimum width for all columns */
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        #downloadLink {
+            display: inline-block;
+            margin-top: 20px;
+            text-decoration: none;
+            background-color: #2ecc71;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+        }
+        #downloadLink:hover {
+            background-color: #27ae60;
+        }
+    </style>
+</head>
+<body>
+    <h1>EQ Log Parser</h1>
+    <input type="file" id="fileInput" accept=".txt">
+    <button onclick="parseFile()">Parse Log</button>
+    <div id="result"></div>
+
+    <script>
+        function convertTimestamp(timestamp) {
+            const dt = new Date(timestamp);
+            return dt.toLocaleDateString('en-US', {
+                month: '2-digit',
+                day: '2-digit',
+                year: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            }).replace(',', '').toLowerCase();
+        }
+
+        function parseFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please select a file first!');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                const lines = content.split('\n');
+                const parsed_entries = [];
+                let current_seller = null;
+
+                const timestamp_regex = /\[(.*?)\]/;
+                const item_regex = /#(\d+): (.*) - (\d+) platinum pieces\./;
+                const seller_regex = /--Items sold by (.+)--/;
+                const quantity_regex = /^(\d+)x(.+)$/;
+                const charges_regex = /(.*?) - (\d+) charges remaining$/;
+
+                for (const line of lines) {
+                    const timestamp_match = line.match(timestamp_regex);
+                    if (!timestamp_match) continue;
+
+                    const raw_timestamp = timestamp_match[1];
+
+                    const seller_match = line.match(seller_regex);
+                    if (seller_match) {
+                        current_seller = seller_match[1];
+                        continue;
+                    }
+
+                    const item_match = line.match(item_regex);
+                    if (item_match && current_seller) {
+                        const timestamp = convertTimestamp(raw_timestamp);
+                        let [, id, item_name, price] = item_match;
+
+                        let qty = "1";
+                        const quantity_match = item_name.match(quantity_regex);
+                        if (quantity_match) {
+                            [, qty, item_name] = quantity_match;
+                        }
+
+                        let charges = null;
+                        const charges_match = item_name.match(charges_regex);
+                        if (charges_match) {
+                            [, item_name, charges] = charges_match;
+                        }
+
+                        const entry = {
+                            timestamp,
+                            seller: current_seller,
+                            id,
+                            item: item_name.trim(),
+                            price,
+                            qty,
+                            charges: charges || 'N/A'
+                        };
+
+                        parsed_entries.push(entry);
+                    }
+                }
+
+                displayTable(parsed_entries);
+                createDownloadLink(parsed_entries);
+            };
+            reader.readAsText(file);
+        }
+
+        function displayTable(data) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = ''; // Clear previous results
+
+            if (data.length === 0) {
+                resultDiv.textContent = 'No data parsed.';
+                return;
+            }
+
+            const tableContainer = document.createElement('div');
+            tableContainer.className = 'table-container';
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+
+            // Create header row
+            const headerRow = document.createElement('tr');
+            const headers = ['Timestamp', 'Seller', 'ID', 'Item', 'Price', 'Qty', 'Charges'];
+            headers.forEach(headerText => {
+                const th = document.createElement('th');
+                th.textContent = headerText;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+
+            // Create data rows
+            data.forEach(entry => {
+                const row = document.createElement('tr');
+                headers.forEach(header => {
+                    const td = document.createElement('td');
+                    td.textContent = entry[header.toLowerCase()] || 'N/A';
+                    row.appendChild(td);
+                });
+                tbody.appendChild(row);
+            });
+
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            tableContainer.appendChild(table);
+            resultDiv.appendChild(tableContainer);
+        }
+
+        function createDownloadLink(data) {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "listsold.json");
+            downloadAnchorNode.setAttribute("id", "downloadLink");
+            downloadAnchorNode.textContent = "Download JSON";
+            document.body.appendChild(downloadAnchorNode);
+        }
+    </script>
+</body>
+</html>

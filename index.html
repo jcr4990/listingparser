@@ -6,7 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dalaya Listing Parser</title>
     <style>
-        html, body {
+        html,
+        body {
             height: 100%;
             margin: 0;
             padding: 0;
@@ -31,7 +32,7 @@
         }
 
         h1 {
-            margin: 0 0 20px 0;
+            margin: 0;
         }
 
         button {
@@ -42,16 +43,22 @@
             cursor: pointer;
             transition: background-color 0.3s;
             border-radius: 5px;
+            margin: 0 5px;
         }
 
         button:hover {
             background-color: #1e6a9c;
         }
 
+        button:disabled {
+            background-color: #666;
+            cursor: not-allowed;
+        }
+
         #searchBox {
             width: 25%;
             padding: 10px;
-            margin: 20px auto;
+            margin: 10px auto;
             display: block;
             font-size: 16px;
         }
@@ -69,7 +76,8 @@
             border-collapse: collapse;
         }
 
-        th, td {
+        th,
+        td {
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid #ddd;
@@ -122,8 +130,15 @@
             background-color: #1e6a9c;
         }
 
-        .parseBtn {
-            margin: 20px;
+        .status {
+            color: #666;
+            margin: 0;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
         }
     </style>
 </head>
@@ -131,16 +146,22 @@
 <body>
     <div class="header">
         <h1>Dalaya Listing Parser</h1>
-        <p>Turn /log on and #listsold NEXT to get listing data then open your log file below to parse.</p>
-        <p style="color: red;margin-top: 0px;margin-bottom:20px;">* Do not excessively spam #listsold *</p>
-        <input type="file" id="fileInput" accept=".txt">
-        <button class="parseBtn" onclick="parseFile()">Parse</button>
+        <p>Turn /log on and use #listsold NEXT to populate. Log entries greater than 2 days old will be ignored.</p>
+        <p style="color: red;margin-top: 0px;margin-bottom:20px;">* Do not excessively spam #listsold or risk dev's wrath! *</p>
+        <div class="controls">
+            <button id="selectBtn">Select Log File</button>
+            <button id="stopBtn" style="display: none;">Stop Watching</button>
+        </div>
+        <div id="status" class="status">No file selected</div>
     </div>
     <input type="text" id="searchBox" placeholder="Search for items..." style="display: none;">
     <div id="result" class="table-container"></div>
 
     <script>
         let allData = [];
+        let fileHandle = null;
+        let watchInterval = null;
+        let lastContent = '';
 
         function convertTimestamp(timestamp) {
             const dt = new Date(timestamp);
@@ -154,83 +175,131 @@
             }).replace(',', '').toLowerCase();
         }
 
-        function parseFile() {
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
-            if (!file) {
-                alert('Please select a file first!');
-                return;
+        async function watchFile() {
+            try {
+                [fileHandle] = await window.showOpenFilePicker();
+                const status = document.getElementById('status');
+                const selectBtn = document.getElementById('selectBtn');
+                const stopBtn = document.getElementById('stopBtn');
+
+                // Get initial content and parse
+                const file = await fileHandle.getFile();
+                const content = await file.text();
+                lastContent = content;
+                parseContent(content);
+
+                // Update UI
+                status.textContent = `Watching: ${file.name}`;
+                selectBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                document.getElementById('searchBox').style.display = 'block';
+
+                // Set up watching
+                watchInterval = setInterval(checkForChanges, 5000);
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    document.getElementById('status').textContent = `Error: ${err.message}`;
+                }
             }
+        }
 
-            const reader = new FileReader();
-            reader.onload = function (e) {
-                const content = e.target.result;
-                const lines = content.split('\n');
-                const parsed_entries = [];
-                let current_seller = null;
+        async function checkForChanges() {
+            try {
+                const file = await fileHandle.getFile();
+                const content = await file.text();
 
-                const timestamp_regex = /\[(.*?)\]/;
-                const item_regex = /#(\d+): (.*) - (\d+) platinum pieces\./;
-                const seller_regex = /--Items sold by (.+)--/;
-                const quantity_regex = /^(\d+)x(.+)$/;
-                const charges_regex = /(.*?) - (\d+) charges remaining$/;
+                if (content !== lastContent) {
+                    parseContent(content);
+                    lastContent = content;
+                }
+            } catch (err) {
+                console.error('Error checking for changes:', err);
+                stopWatching();
+            }
+        }
 
-                for (const line of lines) {
-                    const timestamp_match = line.match(timestamp_regex);
-                    if (!timestamp_match) continue;
+        function stopWatching() {
+            if (watchInterval) {
+                clearInterval(watchInterval);
+                watchInterval = null;
+                document.getElementById('status').textContent = 'Watching stopped';
+                document.getElementById('selectBtn').style.display = 'inline-block';
+                document.getElementById('stopBtn').style.display = 'none';
+            }
+        }
 
-                    const raw_timestamp = timestamp_match[1];
 
-                    const seller_match = line.match(seller_regex);
-                    if (seller_match) {
-                        current_seller = seller_match[1];
-                        continue;
-                    }
+        function parseContent(content) {
+            const lines = content.split('\n');
+            const parsed_entries = [];
+            let current_seller = null;
 
-                    const item_match = line.match(item_regex);
-                    if (item_match && current_seller) {
-                        const timestamp = convertTimestamp(raw_timestamp);
-                        let [, id, item_name, price] = item_match;
+            const timestamp_regex = /\[(.*?)\]/;
+            const item_regex = /#(\d+): (.*) - (\d+) platinum pieces\./;
+            const seller_regex = /--Items sold by (.+)--/;
+            const quantity_regex = /^(\d+)x(.+)$/;
+            const charges_regex = /(.*?) - (\d+) charges remaining$/;
 
-                        let qty = "1";
-                        const quantity_match = item_name.match(quantity_regex);
-                        if (quantity_match) {
-                            [, qty, item_name] = quantity_match;
-                        }
+            // Get current time and calculate 2 days ago
+            const twoDaysAgo = new Date();
+            twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
 
-                        let charges = null;
-                        const charges_match = item_name.match(charges_regex);
-                        if (charges_match) {
-                            [, item_name, charges] = charges_match;
-                        }
+            for (const line of lines) {
+                const timestamp_match = line.match(timestamp_regex);
+                if (!timestamp_match) continue;
 
-                        const entry = {
-                            timestamp,
-                            seller: current_seller,
-                            id,
-                            item: item_name.trim(),
-                            price,
-                            qty,
-                            charges: charges
-                        };
+                // Parse the timestamp and check if it's within the last 2 days
+                const lineDate = new Date(timestamp_match[1]);
+                if (lineDate < twoDaysAgo) continue;
 
-                        parsed_entries.push(entry);
-                    }
+                const raw_timestamp = timestamp_match[1];
+
+                const seller_match = line.match(seller_regex);
+                if (seller_match) {
+                    current_seller = seller_match[1];
+                    continue;
                 }
 
-                parsed_entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                allData = parsed_entries;
-                displayTable(parsed_entries);
-                createDownloadLink(parsed_entries);
-                fileInput.value = '';
-                document.getElementById('searchBox').style.display = 'block';
-            };
-            reader.readAsText(file);
+                const item_match = line.match(item_regex);
+                if (item_match && current_seller) {
+                    const timestamp = convertTimestamp(raw_timestamp);
+                    let [, id, item_name, price] = item_match;
+
+                    let qty = "1";
+                    const quantity_match = item_name.match(quantity_regex);
+                    if (quantity_match) {
+                        [, qty, item_name] = quantity_match;
+                    }
+
+                    let charges = null;
+                    const charges_match = item_name.match(charges_regex);
+                    if (charges_match) {
+                        [, item_name, charges] = charges_match;
+                    }
+
+                    const entry = {
+                        timestamp,
+                        seller: current_seller,
+                        id,
+                        item: item_name.trim(),
+                        price,
+                        qty,
+                        charges: charges
+                    };
+
+                    parsed_entries.push(entry);
+                }
+            }
+
+            parsed_entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            allData = parsed_entries;
+            displayTable(parsed_entries);
+            createDownloadLink(parsed_entries);
         }
 
         function displayTable(data) {
             const resultDiv = document.getElementById('result');
-            resultDiv.innerHTML = ''; // Clear previous results
+            resultDiv.innerHTML = '';
 
             if (data.length === 0) {
                 resultDiv.textContent = 'No data parsed.';
@@ -241,7 +310,6 @@
             const thead = document.createElement('thead');
             const tbody = document.createElement('tbody');
 
-            // Create header row
             const headerRow = document.createElement('tr');
             const headers = ['Timestamp', 'Seller', 'ID', '#listbuy', 'Item', 'Price', 'Qty', 'Charges'];
             headers.forEach(headerText => {
@@ -251,7 +319,6 @@
             });
             thead.appendChild(headerRow);
 
-            // Create data rows
             data.forEach(entry => {
                 const row = document.createElement('tr');
                 headers.forEach(header => {
@@ -261,15 +328,15 @@
                         const textToCopy = `#listbuy ${entry.seller} ${entry.id}`;
                         copyButton.textContent = textToCopy;
                         copyButton.className = 'copy-button';
-                        copyButton.onclick = function() {
-                            navigator.clipboard.writeText(textToCopy).then(function() {
+                        copyButton.onclick = function () {
+                            navigator.clipboard.writeText(textToCopy).then(function () {
                                 copyButton.textContent = 'Copied!';
                                 copyButton.classList.add('copied');
                                 setTimeout(() => {
                                     copyButton.textContent = textToCopy;
                                     copyButton.classList.remove('copied');
                                 }, 2000);
-                            }, function(err) {
+                            }, function (err) {
                                 console.error('Could not copy text: ', err);
                             });
                         };
@@ -278,7 +345,7 @@
                         const link = document.createElement('a');
                         link.href = `https://wiki.shardsofdalaya.com/w/index.php?search=${encodeURIComponent(entry[header.toLowerCase()])}`;
                         link.textContent = entry[header.toLowerCase()];
-                        link.target = '_blank'; // Open in new tab
+                        link.target = '_blank';
                         td.appendChild(link);
                     } else {
                         td.textContent = entry[header.toLowerCase()];
@@ -294,6 +361,11 @@
         }
 
         function createDownloadLink(data) {
+            const existingLink = document.getElementById('downloadLink');
+            if (existingLink) {
+                existingLink.remove();
+            }
+
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
             const downloadAnchorNode = document.createElement('a');
             downloadAnchorNode.setAttribute("href", dataStr);
@@ -305,13 +377,22 @@
 
         function searchItems() {
             const searchTerm = document.getElementById('searchBox').value.toLowerCase();
-            const filteredData = allData.filter(entry => 
+            const filteredData = allData.filter(entry =>
                 entry.item.toLowerCase().includes(searchTerm)
             );
             displayTable(filteredData);
         }
 
+        // Event Listeners
+        document.getElementById('selectBtn').addEventListener('click', watchFile);
+        document.getElementById('stopBtn').addEventListener('click', stopWatching);
         document.getElementById('searchBox').addEventListener('input', searchItems);
+
+        // Check for API support
+        if (!('showOpenFilePicker' in window)) {
+            document.getElementById('status').innerHTML = 'Your browser doesn\'t support the File System Access API. Please use Chrome or Edge.';
+            document.getElementById('selectBtn').disabled = true;
+        }
     </script>
 </body>
 

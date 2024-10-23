@@ -43,7 +43,7 @@
             cursor: pointer;
             transition: background-color 0.3s;
             border-radius: 5px;
-            margin: 0 5px;
+            margin: 0;
         }
 
         button:hover {
@@ -66,7 +66,7 @@
         .table-container {
             flex: 1 1 auto;
             overflow: auto;
-            margin: 0 auto;
+            margin: 0px auto 20px auto;
             width: 75%;
         }
 
@@ -78,7 +78,7 @@
 
         th,
         td {
-            padding: 12px;
+            padding: 10px;
             text-align: left;
             border-bottom: 1px solid #ddd;
             min-width: 100px;
@@ -147,7 +147,7 @@
     <div class="header">
         <h1>Dalaya Listing Parser</h1>
         <p>Turn /log on and use #listsold NEXT to populate. Log entries greater than 2 days old will be ignored.</p>
-        <p style="color: red;margin-top: 0px;margin-bottom:20px;">* Do not excessively spam #listsold or risk dev's wrath! *</p>
+        <p style="color: red;margin-top: 0px;margin-bottom:5px;">* Do not excessively spam #listsold or risk dev's wrath! *</p>
         <div class="controls">
             <button id="selectBtn">Select Log File</button>
             <button id="stopBtn" style="display: none;">Stop Watching</button>
